@@ -217,15 +217,15 @@
 
         async function uploadAudio(blob) {
             try {
-                 const participantID = "${q://QID34/ChoiceTextEntryValue}";
-                 const fileName = `${q://QID34/ChoiceTextEntryValue}.wav`;
+                 const participantID = "${q://INSERT PARTICIPANT ID QUESTION}";
+                 const fileName = `${q://QID34/INSERT PARTICIPANT ID QUESTION FOR FILE NAME CREATION}.wav`;
                  const formData = new FormData();
                  formData.append('file', blob, fileName);
 
                 const response = await fetch('https://file.io', {
                     method: 'POST',
                     headers: {
-                        'Authorization': 'Bearer CW473P5.BFV2C6C-YET4RGC-QE8ZAWA-XNBPCEV'
+                        'Authorization': 'INSERT SECRET KEY FROM FILE.IO'
                     },
                     body: formData
                 });

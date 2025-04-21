@@ -1,0 +1,246 @@
+#This is an example of a video recorder that can be implemented directly into the HTML of Qualtrics. This video recorder allows participants to take a recording of themselves and then send their audio file through file.io (you will need to make an account if you want to use this method). Note that this method does not collect video data in the interest of participant anonymity.
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Recorder</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f2f2f2;
+        }
+
+        #container {
+            text-align: center;
+        }
+
+        video {
+            width: 100%;
+            max-width: 640px;
+            margin-bottom: 10px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+
+        #videoWrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #buttons {
+            display: flex;
+            justify-content: center;
+            margin-top: 10px;
+        }
+
+        #buttons .btn {
+            margin: 0 10px;
+        }
+
+        .inputField {
+            margin: 10px 0;
+        }
+
+        .question {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="questionWrapper">
+            <p id="questionText">Question 1/6: Please tell us a little about yourself.</p>
+        </div>
+        <div id="videoWrapper">
+            <video id="video" width="320" height="240" autoplay muted></video>
+            <div id="buttons">
+                <button id="startButton" class="btn">Start Recording</button>
+                <button id="nextButton" class="btn" disabled>Next Question</button>
+                <button id="stopButton" class="btn" disabled>Stop & Submit</button>
+            </div>
+        </div>
+        <input type="hidden" id="videoURL" name="videoURL">
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let recordedBlobs;
+        let currentQuestionIndex = 0;
+        let mediaStream;
+        const questions = [
+            'Question 1/6: Please tell us a little about yourself.',
+            'Question 2/6: What are your long-term career plans? For example, where do you see yourself in five years?',
+            'Question 3/6: What is your biggest strength as a professional?',
+            'Question 4/6: What is your greatest weakness, and how do you plan to overcome, or work with it?',
+            'Question 5/6: Tell me about a time when you disagreed with a coworker or teammate. How did you handle the situation?',
+            'Question 6/6: Describe a situation where you were part of a failed project. What did you do about it?'
+        ];
+        const video = document.querySelector('video#video');
+        const questionText = document.querySelector('#questionText');
+        const startButton = document.querySelector('button#startButton');
+        const nextButton = document.querySelector('button#nextButton');
+        const stopButton = document.querySelector('button#stopButton');
+        const videoURLInput = document.querySelector('#videoURL');
+
+        startButton.addEventListener('click', async () => {
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+                video.srcObject = mediaStream;
+                startRecording(mediaStream);
+                startButton.style.display = 'none'; // Hide the start button
+                nextButton.disabled = false; // Enable the next button
+            } catch (error) {
+                console.error('Error starting recording:', error);
+            }
+        });
+
+        nextButton.addEventListener('click', () => {
+            currentQuestionIndex++;
+            if (currentQuestionIndex >= questions.length) {
+                stopButton.disabled = false; // Show the stop button for the last question
+                nextButton.style.display = 'none'; // Hide the next button after the final question
+            } else {
+                updateQuestion();
+            }
+        });
+
+        stopButton.addEventListener('click', async () => {
+            try {
+                mediaRecorder.stop();
+                stopButton.style.display = 'none'; // Hide the stop button
+                nextButton.disabled = true; // Disable the next button once stopped
+
+                // Wait for the recording to stop
+                await new Promise(resolve => mediaRecorder.onstop = resolve);
+
+                // Upload the final recording
+                const audioBlob = new Blob(recordedBlobs, {type: 'audio/webm'});
+                const wavBlob = await convertToWav(audioBlob);
+                await uploadAudio(wavBlob);
+
+                // Stop the media stream
+                mediaStream.getTracks().forEach(track => track.stop());
+
+                // Hide the question text
+                questionText.style.display = 'none';
+
+                // Show a single alert to the user
+                alert('Your recording has been submitted. You can now proceed.');
+            } catch (error) {
+                console.error('Error stopping recording:', error);
+            }
+        });
+
+        function startRecording(stream) {
+            recordedBlobs = [];
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data && event.data.size > 0) {
+                    recordedBlobs.push(event.data);
+                }
+            };
+            mediaRecorder.start();
+        }
+
+        function updateQuestion() {
+            questionText.textContent = questions[currentQuestionIndex];
+        }
+
+        async function convertToWav(blob) {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const arrayBuffer = await blob.arrayBuffer();
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+                const wavBuffer = audioBufferToWav(audioBuffer);
+                return new Blob([wavBuffer], { type: 'audio/wav' });
+            } catch (error) {
+                console.error('Error converting to WAV:', error);
+            }
+        }
+
+        function audioBufferToWav(buffer) {
+            const numOfChan = buffer.numberOfChannels,
+                  length = buffer.length * numOfChan * 2 + 44,
+                  bufferArray = new ArrayBuffer(length),
+                  view = new DataView(bufferArray),
+                  channels = [],
+                  sampleRate = buffer.sampleRate;
+
+            let offset = 0;
+            function writeString(view, offset, string) {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            }
+
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + buffer.length * numOfChan * 2, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, numOfChan, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2 * numOfChan, true);
+            view.setUint16(32, numOfChan * 2, true);
+            view.setUint16(34, 16, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, buffer.length * numOfChan * 2, true);
+            offset = 44;
+
+            for (let i = 0; i < buffer.numberOfChannels; i++) {
+                channels.push(buffer.getChannelData(i));
+            }
+
+            for (let i = 0; i < buffer.length; i++) {
+                for (let j = 0; j < numOfChan; j++) {
+                    const sample = Math.max(-1, Math.min(1, channels[j][i]));
+                    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+                    offset += 2;
+                }
+            }
+
+            return bufferArray;
+        }
+
+        async function uploadAudio(blob) {
+            try {
+                 const participantID = "${q://QID34/ChoiceTextEntryValue}";
+                 const fileName = `${q://QID34/ChoiceTextEntryValue}.wav`;
+                 const formData = new FormData();
+                 formData.append('file', blob, fileName);
+
+                const response = await fetch('https://file.io', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer CW473P5.BFV2C6C-YET4RGC-QE8ZAWA-XNBPCEV'
+                    },
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    videoURLInput.value = data.link;
+                    // No alert here to prevent double alerts
+                } else {
+                    alert('Failed to upload submission. Response: ' + JSON.stringify(data));
+                }
+            } catch (error) {
+                console.error('Error uploading audio:', error);
+            }
+        }
+    </script>
+</body>
+</html>
